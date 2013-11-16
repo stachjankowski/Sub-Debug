@@ -3,18 +3,18 @@ use strict;
 use warnings;
 
 =head1 TODO
-- udokumentowaæ przypadki u¿ycia
-- posprz¹taæ i udokumentowaæ kod
-- dodaæ opcje prze³¹cznikowe np:
+- udokumentowaÄ‡ przypadki uÅ¼ycia
+- posprzÄ…taÄ‡ i udokumentowaÄ‡ kod
+- dodaÄ‡ opcje przeÅ‚Ä…cznikowe np:
    -nomem lub -usemem
    -fullmem
-- pozbyæ siê parametru ref i zast¹piæ za pomoc¹:
+- pozbyÄ‡ siÄ™ parametru ref i zastÄ…piÄ‡ za pomocÄ…:
    - 'use Sub::Debug $result'
    - 'use Sub::Debug %result'
    - 'use Sub::Debug @result'
-- dodaæ testy uruchamiane z poziomu serwera www
-- przetestowaæ na innych platformach: win, bsd
-- przenieœæ do zewnêtrznego repozytorium
+- dodaÄ‡ testy uruchamiane z poziomu serwera www
+- przetestowaÄ‡ na innych platformach: win, bsd
+- przenieÅ›Ä‡ do zewnÄ™trznego repozytorium
 =cut
 
 =head1 NAME
