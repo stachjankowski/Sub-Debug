@@ -1,12 +1,43 @@
 package Sub::Debug;
-
 use strict;
 use warnings;
 
-our $VERSION;
-BEGIN {
-    $VERSION = '0.0';
-};
+=head1 TODO
+- udokumentowaæ przypadki u¿ycia
+- posprz¹taæ i udokumentowaæ kod
+- dodaæ opcje prze³¹cznikowe np:
+   -nomem lub -usemem
+   -fullmem
+- pozbyæ siê parametru ref i zast¹piæ za pomoc¹:
+   - 'use Sub::Debug $result'
+   - 'use Sub::Debug %result'
+   - 'use Sub::Debug @result'
+- dodaæ testy uruchamiane z poziomu serwera www
+- przetestowaæ na innych platformach: win, bsd
+- przenieœæ do zewnêtrznego repozytorium
+=cut
+
+=head1 NAME
+ 
+Sub::Debug - Tools to inspect subroutine.
+ 
+=head1 VERSION
+ 
+Version 0.1
+
+=cut
+
+our $VERSION = '0.1';
+
+=head1 SYNOPSIS
+use Sub::Debug; # `print' is default log handler
+use Sub::Debug sub { print @_ };
+use Sub::Debug \&Log::Info;
+use Sub::Debug 'Log::Info';
+
+sub TestedSub : Debug(exclude=>[qw($self)]) {
+sub TestedSub : Debug(include=>[qw($self)]) {
+=cut
 
 use Attribute::Handlers;
 use B;
@@ -14,6 +45,8 @@ use Data::Dumper;
 use List::MoreUtils qw/any none firstidx/;
 use Module::Load;
 use PadWalker qw/peek_sub/;
+eval 'use Memory::Usage';
+my $use_memory_full_report = !$@;
 
 my $log_handler;
 
@@ -29,6 +62,7 @@ sub import {
         my ($pkg, $subname) = ($1, $2);
         eval {
             load $pkg;
+            no strict 'refs';
             $log_handler = *{$full_sub_name};
         }
     }
@@ -36,6 +70,7 @@ sub import {
         $log_handler = sub { print @_ };
     }
 }
+
 sub UNIVERSAL::Debug : ATTR(CODE) {
     my ($package, $symbol, $referent, undef, $data, undef, $filename) = @_;
     $filename ||= locate_file_by_package($package);
@@ -52,9 +87,10 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
         my $sub_vars = peek_sub($referent);
         _filter_variables($direction, $sub_vars, @names);
         _filter_variables($direction, $in_vars, @names);
+        my $before_memory_usage = memory_usage();
         my $before_vars = {
-            'in'        => $in_vars,
-            'mem_usage' => mem_usage()
+            'in'           => $in_vars,
+            'memory_usage' => $before_memory_usage
         };
         my $after_vars = {
             'sub'     => $sub_vars
@@ -74,6 +110,11 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
         }
         my (@ret, $ret, $err);
         my $what_you_want = wantarray ? 'wantarray' : defined wantarray ? 'scalar' : 'nothing';
+        my $mu;
+        if ( $use_memory_full_report ) {
+           $mu = Memory::Usage->new();
+           $mu->record('before');
+        }
         eval {
             if ($what_you_want eq 'wantarray') {
                 @ret = &{$referent};
@@ -93,12 +134,25 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
             $after_vars->{'return'} = \$ret;
         }
         $after_vars->{'error'} = "$err" if $err;
-        $after_vars->{'mem_usage'} = mem_usage();
-        $after_vars->{'memory_leak'} = $after_vars->{'mem_usage'} - $before_vars->{'mem_usage'};
+        $after_vars->{'memory_usage'} = 'memory_usage_to_replace';
+        $after_vars->{'memory_leak'} = 'memory_leak_to_replace';
+
+        if ( $use_memory_full_report ) {
+           $mu->record('after');
+           $after_vars->{'memory_report'} = "\n".$mu->report();
+        }
+        my $dump = Dumper $after_vars;
+        ## free memory
+        undef $after_vars, $before_vars;
+
+        my $after_memory_usage = memory_usage();
+        my $memory_leak = $after_memory_usage - $before_memory_usage;
+        $dump =~ s/memory_usage_to_replace/$after_memory_usage/;
+        $dump =~ s/memory_leak_to_replace/$memory_leak/;
         if ( $params{'ref'} ) {
             $ref->{'after'} = $after_vars;
         } else {
-            $log_handler->("Variables after executing $full_sub_name (uniqID: $uniqID ):\n" . Dumper $after_vars);
+            $log_handler->("Variables after executing $full_sub_name (uniqID: $uniqID ):\n$dump");
         }
 
         die($err) if $err;  # re raise error
@@ -157,7 +211,6 @@ sub _bind_in_vars {
     return $in_vars;
 }
 
-
 sub _get_assignment_line {
     my ( $file, $subname ) = @_;
 
@@ -206,18 +259,23 @@ sub _filter_variables {
 
 sub locate_file_by_package {
    my $file = shift;
-   #use Log;
    $file =~ s@ \:\: @/@gx;
    $file = "$file.pm";
-   #Log::Info( 'marker', $file, -e $file );
-   return -e $file ? $file : "";
+   return $INC{$file} || (-e $file ? $file : "");
 }
 
-sub mem_usage {
+sub memory_usage {
    open(my $statm, "<", "/proc/$$/statm");
    my @stat = split /\s+/, <$statm>;
    close $statm;
    return $stat[1] * .004;
 }
+
+=head1 LICENSE
+"THE BEER-WARE LICENSE" (Revision 42):
+<stach.jankowski@gmail.com> wrote this file. As long as you retain this notice you
+can do whatever you want with this stuff. If we meet some day, and you think
+this stuff is worth it, you can buy me a beer in return Stach Jankowski.
+=cut
 
 1;
