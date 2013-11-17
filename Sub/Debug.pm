@@ -33,7 +33,6 @@ our $VERSION = '0.1';
 use Sub::Debug; # `print' is default log handler
 use Sub::Debug sub { print @_ };
 use Sub::Debug \&Log::Info;
-use Sub::Debug 'Log::Info';
 
 sub TestedSub : Debug(exclude=>[qw($self)]) {
 sub TestedSub : Debug(include=>[qw($self)]) {
@@ -41,45 +40,34 @@ sub TestedSub : Debug(include=>[qw($self)]) {
 
 use Attribute::Handlers;
 use B;
+use Carp;
 use Data::Dumper;
 use List::MoreUtils qw/any none firstidx/;
 use Module::Load;
 use PadWalker qw/peek_sub/;
-eval 'use Memory::Usage';
-my $use_memory_full_report = !$@;
+use Memory::Usage;
 
 my $log_handler;
 my $ref_handler;
 
 sub import {
-    my $class = shift;
-    my $type = ref($_[0]);
+    my ($class, $handler) = @_;
+    my $type = ref($handler);
     if ( $type eq 'CODE' ) {                        # use Sub::Debug sub{...}
-        $log_handler = shift;
+        $log_handler = $handler;
     } elsif ( $type eq 'ARRAY' ) {                  # use Sub::Debug \@return
-        my $ref = shift;
+        my $ref = $handler;
         $ref_handler = sub { push @{$ref}, $_[0] };
     } elsif ( $type eq 'HASH' ) {                   # use Sub::Debug \%return
-        my $ref = shift;
+        my $ref = $handler;
         $ref_handler = sub { %{ $ref } = %{ $_[0] } };
     } else {                                        # use Sub::Debug or use Sub::Debug 'Log::Info'
-        my $full_sub_name = shift;
-        if ( $full_sub_name && $full_sub_name =~ /::/ ) {
-            $full_sub_name =~ /^(.*)::(.*?)$/;
-            my ($pkg, $subname) = ($1, $2);
-            eval {
-                load $pkg;
-                no strict 'refs';
-                $log_handler = *{$full_sub_name};
-            }
-        }
-        unless ( $log_handler ) {
-            $log_handler = sub { print @_ };
-        }
+        $log_handler = sub { print @_ };
     }
+    return;
 }
 
-sub UNIVERSAL::Debug : ATTR(CODE) {
+sub UNIVERSAL::Debug : ATTR(CODE) {  ## no critic (ProhibitManyArgs)
     my ($package, $symbol, $referent, undef, $data, undef, $filename) = @_;
     $filename ||= locate_file_by_package($package);
     my $cv = B::svref_2object( $symbol );
@@ -87,8 +75,8 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
     my @in_names = _in_names($filename, $cv->NAME);
     my %params = _parse_args($data);
 
-    no warnings 'redefine';
-    *{$symbol} = sub {
+    no warnings 'redefine';  ## no critic (ProhibitNoWarnings)
+    return *{$symbol} = sub {
         my $in_vars = _bind_in_vars(\@in_names, [@_]);
         my $direction = $params{'include'} ? 'include'             : $params{'exclude'} ? 'exclude'             : '';
         my @names     = $params{'include'} ? @{$params{'include'}} : $params{'exclude'} ? @{$params{'exclude'}} : ();
@@ -98,14 +86,10 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
         my $before_vars = {
             'in'           => $in_vars
         };
-        my ($before_memory_usage, $mu);
+        my $mu;
         unless ( $params{nomem} ) {
-            $before_memory_usage = memory_usage();
-            $before_vars->{'memory_usage'} = $before_memory_usage;
-            if ( $use_memory_full_report ) {
-                $mu = Memory::Usage->new();
-                $mu->record('before');
-            }
+            $mu = Memory::Usage->new();
+            $mu->record('before');
         }
         my $after_vars = {
             'sub'     => $sub_vars
@@ -139,14 +123,7 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
             $after_vars->{'return'} = \$ret;
         }
         $after_vars->{'error'} = "$err" if $err;
-        unless ( $params{nomem} ) {
-            $after_vars->{'memory_usage'} = 'memory_usage_to_replace';
-            $after_vars->{'memory_leak'} = 'memory_leak_to_replace';
-            if ( $use_memory_full_report ) {
-                $mu->record('after');
-                $after_vars->{'memory_report'} = "\n".$mu->report();
-            }
-        }
+        $after_vars->{'memory_report'} = 'memory_report_to_replace' unless $params{nomem};
         my $dump = Dumper $after_vars;
         ## free memory
         unless ( $ref_handler ) {
@@ -155,15 +132,14 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
         }
 
         unless ( $params{nomem} ) {
-            my $after_memory_usage = memory_usage();
-            my $memory_leak = $after_memory_usage - $before_memory_usage;
-            $dump =~ s/memory_usage_to_replace/$after_memory_usage/;
-            $dump =~ s/memory_leak_to_replace/$memory_leak/;
+            $mu->record('after');
+            my $memory_report = "\n".$mu->report();
+            $dump =~ s/memory_report_to_replace/$memory_report/;
         }
 
         $log_handler->("Variables after executing $full_sub_name (uniqID: $uniqID ):\n$dump");
 
-        die($err) if $err;  # re raise error
+        croak($err) if $err;  # re raise error
 
         return
             $what_you_want eq 'wantarray' ? @ret
@@ -222,19 +198,15 @@ sub _bind_in_vars {
 sub _get_assignment_line {
     my ( $file, $subname ) = @_;
 
-    die("Filename $file does not exists") unless -e $file;
-    die("No subname specified") unless $subname;
+    croak("Filename $file does not exists") unless -e $file;
+    croak("No subname specified") unless $subname;
 
     my ($buffer, $match);
-    open my $FH, '<', $file or die("Problem with opening $file");
+    open my $FH, '<', $file or croak("Problem with opening $file");
     while ( my $line = <$FH> ) {
-        chomp $line;
         if ( $line =~ / sub \s* $subname \b /x || $match ) {
-            $buffer .= $line;
-            last if $match;
-            $match = 1;
-        } else {
-            $match = 0;
+            $buffer .= $line . <$FH>;
+            last;
         }
     }
     close $FH;
@@ -263,6 +235,7 @@ sub _filter_variables {
             }
         }
     }
+    return;
 }
 
 sub _parse_args {
@@ -280,13 +253,6 @@ sub locate_file_by_package {
    $file =~ s@ \:\: @/@gx;
    $file = "$file.pm";
    return $INC{$file} || (-e $file ? $file : "");
-}
-
-sub memory_usage {
-   open(my $statm, "<", "/proc/$$/statm");
-   my @stat = split /\s+/, <$statm>;
-   close $statm;
-   return $stat[1] * .004;
 }
 
 =head1 LICENSE

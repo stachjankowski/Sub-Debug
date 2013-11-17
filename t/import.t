@@ -3,7 +3,6 @@ use warnings;
 
 use Test::More;
 
-use Sub::Debug 't::Log::Log';
 use t::Log;
 use t::Test;
 
