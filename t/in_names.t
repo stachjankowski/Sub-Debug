@@ -11,12 +11,12 @@ sub test : Debug {
 }
 
 sub test2 : Debug {
-    my ($x, $y, %z) = @_;
+    my ( $x, $y, %z ) = @_;
 }
 
-is_deeply([Sub::Debug::_in_names($0, 'test')], [qw/ @args /]);
+is_deeply( [ Sub::Debug::_in_names( $0, 'test' ) ], [qw/ @args /] );
 
-is_deeply([Sub::Debug::_in_names($0, 'test2')], [qw/ $x $y %z /]);
+is_deeply( [ Sub::Debug::_in_names( $0, 'test2' ) ], [qw/ $x $y %z /] );
 
 dies_ok { Sub::Debug::_in_names($0) } 'no subroutine name';
 

@@ -4,7 +4,6 @@ use warnings;
 use Test::More;
 use t::Test;
 
-
 eval 'my %result;
 use Sub::Debug \%result;
 my $ret = t::Test::test2(5, 6);

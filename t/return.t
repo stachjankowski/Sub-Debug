@@ -4,11 +4,11 @@ use warnings;
 use Test::More;
 use Sub::Debug;
 
-my ($x, $y, @x, @y);
+my ( $x, $y, @x, @y );
 
 sub a { my @a = qw(a b c); @a }
 sub b : Debug { &a }
-is_deeply( [b()], [a()] );
+is_deeply( [ b() ], [ a() ] );
 
 ($x) = a();
 ($y) = b();
@@ -22,9 +22,9 @@ $x = a();
 $y = b();
 is( $y, $x );
 
-sub c { qw(a b c) }
+sub c         { qw(a b c) }
 sub d : Debug { &c }
-is_deeply( [d()], [c()] );
+is_deeply( [ d() ], [ c() ] );
 
 ($x) = c();
 ($y) = d();
@@ -38,9 +38,9 @@ $x = c();
 $y = d();
 is( $y, $x );
 
-sub e { qw() }
+sub e         { qw() }
 sub f : Debug { &e }
-is_deeply( [f()], [e()] );
+is_deeply( [ f() ], [ e() ] );
 
 ($x) = e();
 ($y) = f();
@@ -61,7 +61,7 @@ sub g : Debug {
         x => $x,
         y => $y,
         z => \%z
-    }
+    };
 }
 my $result = g( 5, 6, a => 7, b => 8 );
 is_deeply( $result, { x => 5, y => 6, z => { a => 7, b => 8 } } );
