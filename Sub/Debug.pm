@@ -49,25 +49,33 @@ eval 'use Memory::Usage';
 my $use_memory_full_report = !$@;
 
 my $log_handler;
+my $ref_handler;
 
 sub import {
     my $class = shift;
-    if ( ref($_[0]) eq 'CODE' ) {
+    my $type = ref($_[0]);
+    if ( $type eq 'CODE' ) {                        # use Sub::Debug sub{...}
         $log_handler = shift;
-        return;
-    }
-    my $full_sub_name = shift;
-    if ( $full_sub_name && $full_sub_name =~ /::/ ) {
-        $full_sub_name =~ /^(.*)::(.*?)$/;
-        my ($pkg, $subname) = ($1, $2);
-        eval {
-            load $pkg;
-            no strict 'refs';
-            $log_handler = *{$full_sub_name};
+    } elsif ( $type eq 'ARRAY' ) {                  # use Sub::Debug \@return
+        my $ref = shift;
+        $ref_handler = sub { push @{$ref}, $_[0] };
+    } elsif ( $type eq 'HASH' ) {                   # use Sub::Debug \%return
+        my $ref = shift;
+        $ref_handler = sub { %{ $ref } = %{ $_[0] } };
+    } else {                                        # use Sub::Debug or use Sub::Debug 'Log::Info'
+        my $full_sub_name = shift;
+        if ( $full_sub_name && $full_sub_name =~ /::/ ) {
+            $full_sub_name =~ /^(.*)::(.*?)$/;
+            my ($pkg, $subname) = ($1, $2);
+            eval {
+                load $pkg;
+                no strict 'refs';
+                $log_handler = *{$full_sub_name};
+            }
         }
-    }
-    unless ( $log_handler ) {
-        $log_handler = sub { print @_ };
+        unless ( $log_handler ) {
+            $log_handler = sub { print @_ };
+        }
     }
 }
 
@@ -75,9 +83,9 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
     my ($package, $symbol, $referent, undef, $data, undef, $filename) = @_;
     $filename ||= locate_file_by_package($package);
     my $cv = B::svref_2object( $symbol );
-    my %params = @{$data || []};
     my $full_sub_name = $package."::".$cv->SAFENAME();
     my @in_names = _in_names($filename, $cv->NAME);
+    my %params = _parse_args($data);
 
     no warnings 'redefine';
     *{$symbol} = sub {
@@ -87,34 +95,31 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
         my $sub_vars = peek_sub($referent);
         _filter_variables($direction, $sub_vars, @names);
         _filter_variables($direction, $in_vars, @names);
-        my $before_memory_usage = memory_usage();
         my $before_vars = {
-            'in'           => $in_vars,
-            'memory_usage' => $before_memory_usage
+            'in'           => $in_vars
         };
+        my ($before_memory_usage, $mu);
+        unless ( $params{nomem} ) {
+            $before_memory_usage = memory_usage();
+            $before_vars->{'memory_usage'} = $before_memory_usage;
+            if ( $use_memory_full_report ) {
+                $mu = Memory::Usage->new();
+                $mu->record('before');
+            }
+        }
         my $after_vars = {
             'sub'     => $sub_vars
         };
+        $ref_handler->({ before => $before_vars, after => $after_vars }) if $ref_handler;
 
         my $uniqID = sprintf "%07p", rand;
-        my $ref;
-        $ref = eval('$' . $package . '::' . $params{'ref'}) if $params{'ref'};
         local $Data::Dumper::Terse = 1;
         {
             local $Data::Dumper::Sortkeys = _get_sort_sub(@in_names);
-            if ( $params{'ref'} ) {
-                $ref->{'before'} = $before_vars;
-            } else {
-                $log_handler->("Variables before executing $full_sub_name (uniqID: $uniqID ):\n" . Dumper $before_vars);
-            }
+            $log_handler->("Variables before executing $full_sub_name (uniqID: $uniqID ):\n" . Dumper $before_vars);
         }
         my (@ret, $ret, $err);
         my $what_you_want = wantarray ? 'wantarray' : defined wantarray ? 'scalar' : 'nothing';
-        my $mu;
-        if ( $use_memory_full_report ) {
-           $mu = Memory::Usage->new();
-           $mu->record('before');
-        }
         eval {
             if ($what_you_want eq 'wantarray') {
                 @ret = &{$referent};
@@ -134,26 +139,29 @@ sub UNIVERSAL::Debug : ATTR(CODE) {
             $after_vars->{'return'} = \$ret;
         }
         $after_vars->{'error'} = "$err" if $err;
-        $after_vars->{'memory_usage'} = 'memory_usage_to_replace';
-        $after_vars->{'memory_leak'} = 'memory_leak_to_replace';
-
-        if ( $use_memory_full_report ) {
-           $mu->record('after');
-           $after_vars->{'memory_report'} = "\n".$mu->report();
+        unless ( $params{nomem} ) {
+            $after_vars->{'memory_usage'} = 'memory_usage_to_replace';
+            $after_vars->{'memory_leak'} = 'memory_leak_to_replace';
+            if ( $use_memory_full_report ) {
+                $mu->record('after');
+                $after_vars->{'memory_report'} = "\n".$mu->report();
+            }
         }
         my $dump = Dumper $after_vars;
         ## free memory
-        undef $after_vars, $before_vars;
-
-        my $after_memory_usage = memory_usage();
-        my $memory_leak = $after_memory_usage - $before_memory_usage;
-        $dump =~ s/memory_usage_to_replace/$after_memory_usage/;
-        $dump =~ s/memory_leak_to_replace/$memory_leak/;
-        if ( $params{'ref'} ) {
-            $ref->{'after'} = $after_vars;
-        } else {
-            $log_handler->("Variables after executing $full_sub_name (uniqID: $uniqID ):\n$dump");
+        unless ( $ref_handler ) {
+            undef $after_vars;
+            undef $before_vars;
         }
+
+        unless ( $params{nomem} ) {
+            my $after_memory_usage = memory_usage();
+            my $memory_leak = $after_memory_usage - $before_memory_usage;
+            $dump =~ s/memory_usage_to_replace/$after_memory_usage/;
+            $dump =~ s/memory_leak_to_replace/$memory_leak/;
+        }
+
+        $log_handler->("Variables after executing $full_sub_name (uniqID: $uniqID ):\n$dump");
 
         die($err) if $err;  # re raise error
 
@@ -255,6 +263,16 @@ sub _filter_variables {
             }
         }
     }
+}
+
+sub _parse_args {
+    my $data = shift;
+    my @args = @{ $data || [] };
+    my @params;
+    while ( my $arg = shift(@args) ) {
+        push @params, $arg =~ /^\-/ ? (substr($arg,1) => 1) : $arg;
+    }
+    return @params;
 }
 
 sub locate_file_by_package {

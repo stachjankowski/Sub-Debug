@@ -5,10 +5,10 @@ use Test::More;
 use t::Test;
 
 
-eval 'my @ref;
-use Sub::Debug \@ref, -nomem;
+eval 'my %result;
+use Sub::Debug \%result;
 my $ret = t::Test::test2(5, 6);
-is_deeply(@ref, \{
+is_deeply(\%result, {
     before => {
         in => { q{$x} => \5, q{$y} => \6 }
     },
