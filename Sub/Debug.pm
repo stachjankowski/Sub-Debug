@@ -273,11 +273,4 @@ sub locate_file_by_package {
     return $INC{$file} || ( -e $file ? $file : "" );
 }
 
-=head1 LICENSE
-"THE BEER-WARE LICENSE" (Revision 42):
-<stach.jankowski@gmail.com> wrote this file. As long as you retain this notice you
-can do whatever you want with this stuff. If we meet some day, and you think
-this stuff is worth it, you can buy me a beer in return Stach Jankowski.
-=cut
-
 1;
